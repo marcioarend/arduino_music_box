@@ -24,24 +24,34 @@
 #include "Arduino.h"
 #include "SoftwareSerial.h"
 #include "DFRobotDFPlayerMini.h"
-#include "JC_Button.h"
+#include <JC_Button.h>
 
 SoftwareSerial mySoftwareSerial(10,11); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 void printDetail(uint8_t type, int value);
 
-#define buttonPause A0
-#define buttonUp A1
-#define buttonDown A2
+Button nextButton(2,50); //amarelo
+Button playPauseButton(3); // verde
+Button previousButton(4,50); // branco
+boolean isPaused;
+boolean changedVolume;
+const unsigned long LONG_PRESS(500);
+unsigned long ms;
+unsigned long msLast;
 
-Button pauseButton(buttonPause);
-Button upButton(buttonUp);
-Button downButton(buttonDown);
 
 void setup()
 {
   mySoftwareSerial.begin(9600);
   Serial.begin(9600);
+  nextButton.begin();
+  playPauseButton.begin();
+  previousButton.begin();
+  msLast = millis();
+  isPaused = false;
+  //To avoid change songs when the button is released 
+  changedVolume = false;
+
   
   Serial.println();
   Serial.println(F("DFRobot DFPlayer Mini Demo"));
@@ -54,12 +64,12 @@ void setup()
     while(true);
   }
   Serial.println(F("DFPlayer Mini online."));
-  printHelp();
+  //printHelp();
   
   myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
   
   //----Set volume----
-  myDFPlayer.volume(15);  //Set volume value (0~30).
+  myDFPlayer.volume(20);  //Set volume value (0~30).
  // myDFPlayer.volumeUp(); //Volume Up
  // myDFPlayer.volumeDown(); //Volume Down
   
@@ -84,17 +94,68 @@ void setup()
 //  myDFPlayer.enableDAC();  //Enable On-chip DAC
 //  myDFPlayer.disableDAC();  //Disable On-chip DAC
 //  myDFPlayer.outputSetting(true, 15); //output setting, enable the output and set the gain to 15
-  
+  myDFPlayer.play(1);
 
 }
 
 void loop(){
-  if(Serial.available()){
-    readCommand();
-  }
- 
-  if (myDFPlayer.available()) {
-    printDetail(myDFPlayer.readType(), myDFPlayer.read()); //Print the detail message from DFPlayer to handle different errors and states.
+
+  ms = millis(); 
+  nextButton.read();
+    playPauseButton.read();
+    previousButton.read();
+    
+    if (playPauseButton.wasPressed() && isPaused == false) {
+      Serial.println("Pause");
+      myDFPlayer.pause();
+      isPaused = true;
+    } else if (playPauseButton.wasPressed() && isPaused == true) {
+      Serial.println("Play");
+      myDFPlayer.start();
+      isPaused = false;
+    }
+
+    if (nextButton.pressedFor(LONG_PRESS)) {
+        if (changeVolume()) {
+          Serial.println("+++");
+          myDFPlayer.volumeUp();            
+          // the volume was changed
+          changedVolume = true;  
+        }         
+    }
+    
+    if (nextButton.wasReleased() ) {
+        if (changedVolume == false) {
+          myDFPlayer.next();          
+          Serial.println(">>");
+        }
+        changedVolume = false;        
+    }
+  
+    if (previousButton.pressedFor(LONG_PRESS)) {
+        if (changeVolume()) {
+          myDFPlayer.volumeDown();
+          Serial.println("---"); 
+          changedVolume = true;   
+        }
+        
+    }
+     
+    if (previousButton.wasReleased()) {
+      if (changedVolume == false) {
+        myDFPlayer.previous();
+        Serial.println("<<");
+      }
+      changedVolume = false;  
+    }
+}
+
+static boolean changeVolume() {
+  if ((ms-msLast) > 1000) {
+    msLast = ms;
+    return true; 
+  } else {
+    return false;
   }
 }
 
