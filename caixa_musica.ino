@@ -25,8 +25,16 @@
 #include "SoftwareSerial.h"
 #include "DFRobotDFPlayerMini.h"
 #include <JC_Button.h>
+#include "MFRC522.h"
+#include <SPI.h>
 
-SoftwareSerial mySoftwareSerial(10,11); // RX, TX
+#define RST_PIN         9
+#define SS_PIN          10
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);   // Create MFRC522 instance.
+MFRC522::MIFARE_Key key;
+
+SoftwareSerial mySoftwareSerial(5,6); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 void printDetail(uint8_t type, int value);
 
@@ -38,6 +46,7 @@ boolean changedVolume;
 const unsigned long LONG_PRESS(500);
 unsigned long ms;
 unsigned long msLast;
+String uuid;
 
 
 void setup()
@@ -47,29 +56,32 @@ void setup()
   nextButton.begin();
   playPauseButton.begin();
   previousButton.begin();
+  SPI.begin();         // Init SPI bus
+  mfrc522.PCD_Init();  // Init MFRC522 card
   msLast = millis();
   isPaused = false;
   //To avoid change songs when the button is released 
   changedVolume = false;
+  
 
   
-  Serial.println();
-  Serial.println(F("DFRobot DFPlayer Mini Demo"));
-  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+  // Serial.println();
+  // Serial.println(F("DFRobot DFPlayer Mini Demo"));
+  // Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
   
   if (!myDFPlayer.begin(mySoftwareSerial)) {  //Use softwareSerial to communicate with mp3.
-    Serial.println(F("Unable to begin:"));
-    Serial.println(F("1.Please recheck the connection!"));
-    Serial.println(F("2.Please insert the SD card!"));
+    // Serial.println(F("Unable to begin:"));
+    // Serial.println(F("1.Please recheck the connection!"));
+    // Serial.println(F("2.Please insert the SD card!"));
     while(true);
   }
-  Serial.println(F("DFPlayer Mini online."));
+  // Serial.println(F("DFPlayer Mini online."));
   //printHelp();
   
   myDFPlayer.setTimeOut(500); //Set serial communictaion time out 500ms
   
   //----Set volume----
-  myDFPlayer.volume(20);  //Set volume value (0~30).
+  myDFPlayer.volume(15);  //Set volume value (0~30).
  // myDFPlayer.volumeUp(); //Volume Up
  // myDFPlayer.volumeDown(); //Volume Down
   
@@ -94,7 +106,7 @@ void setup()
 //  myDFPlayer.enableDAC();  //Enable On-chip DAC
 //  myDFPlayer.disableDAC();  //Disable On-chip DAC
 //  myDFPlayer.outputSetting(true, 15); //output setting, enable the output and set the gain to 15
-  myDFPlayer.play(1);
+  //myDFPlayer.play(1);
 
 }
 
@@ -106,18 +118,18 @@ void loop(){
     previousButton.read();
     
     if (playPauseButton.wasPressed() && isPaused == false) {
-      Serial.println("Pause");
+      // Serial.println("Pause");
       myDFPlayer.pause();
       isPaused = true;
     } else if (playPauseButton.wasPressed() && isPaused == true) {
-      Serial.println("Play");
+      // Serial.println("Play");
       myDFPlayer.start();
       isPaused = false;
     }
 
     if (nextButton.pressedFor(LONG_PRESS)) {
         if (changeVolume()) {
-          Serial.println("+++");
+          // Serial.println("+++");
           myDFPlayer.volumeUp();            
           // the volume was changed
           changedVolume = true;  
@@ -127,7 +139,7 @@ void loop(){
     if (nextButton.wasReleased() ) {
         if (changedVolume == false) {
           myDFPlayer.next();          
-          Serial.println(">>");
+          // Serial.println(">>");
         }
         changedVolume = false;        
     }
@@ -135,7 +147,7 @@ void loop(){
     if (previousButton.pressedFor(LONG_PRESS)) {
         if (changeVolume()) {
           myDFPlayer.volumeDown();
-          Serial.println("---"); 
+          // Serial.println("---"); 
           changedVolume = true;   
         }
         
@@ -144,10 +156,30 @@ void loop(){
     if (previousButton.wasReleased()) {
       if (changedVolume == false) {
         myDFPlayer.previous();
-        Serial.println("<<");
+        // Serial.println("<<");
       }
       changedVolume = false;  
     }
+
+    
+     // Look for new cards, and select one if present
+    if ( ! mfrc522.PICC_IsNewCardPresent() || ! mfrc522.PICC_ReadCardSerial() ) {
+      delay(50);
+      return;
+    }
+  
+    // Now a card is selected. The UID and SAK is in mfrc522.uid.
+    
+    // Dump UID
+//    Serial.print(F("Card UID:"));
+//    for (byte i = 0; i < mfrc522.uid.size; i++) {
+//      Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+//      Serial.print(mfrc522.uid.uidByte[i], HEX);
+//    } 
+//    // Serial.println();
+      get_UID();
+      
+    
 }
 
 static boolean changeVolume() {
@@ -156,6 +188,36 @@ static boolean changeVolume() {
     return true; 
   } else {
     return false;
+  }
+}
+
+void dump_byte_array(byte *buffer, byte bufferSize) {
+    for (byte i = 0; i < bufferSize; i++) {
+        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+        Serial.print(buffer[i], HEX);
+    }
+}
+
+void get_UID() {
+  String content;
+  for (byte i = 0; i < mfrc522.uid.size; i++) 
+  {
+     content.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "));
+     content.concat(String(mfrc522.uid.uidByte[i], HEX));
+  }
+  content.toUpperCase();
+   Serial.println(content);
+  if (content.substring(1) == "D0 57 DD 25") {
+    myDFPlayer.play(1);
+  } else if (content.substring(1) == "63 4D 7E 3E") {
+    myDFPlayer.play(2);
+  } else if (content.substring(1) == "FA 41 7F 19") {
+    myDFPlayer.play(3); 
+    myDFPlayer.volume(15);  
+  } else if (content.substring(1) == "EA 93 72 19") {
+    myDFPlayer.play(4); 
+  } else if (content.substring(1) == "7A 96 62 1A") {
+    myDFPlayer.play(5); 
   }
 }
 
@@ -168,7 +230,7 @@ void readCommand(){
  
   switch(cmd){
     case 'h': 
-      printHelp();
+     
       break;
       
     case '>':
@@ -232,102 +294,71 @@ void readCommand(){
       break;
     
     case 'q':
-      if(value1 == 1) Serial.println(myDFPlayer.readState()); 
-      else if(value1 == 2) Serial.println(myDFPlayer.readVolume());
-      else if(value1 == 3) Serial.println(myDFPlayer.readEQ());
-      else if(value1 == 4) Serial.println(myDFPlayer.readFileCounts());
-      else if(value1 == 5) Serial.println(myDFPlayer.readFolderCounts());
-      else if(value1 == 6) Serial.println(myDFPlayer.readCurrentFileNumber());
+//      if(value1 == 1) // Serial.println(myDFPlayer.readState()); 
+//      else if(value1 == 2) // Serial.println(myDFPlayer.readVolume());
+//      else if(value1 == 3) // Serial.println(myDFPlayer.readEQ());
+//      else if(value1 == 4) // Serial.println(myDFPlayer.readFileCounts());
+//      else if(value1 == 5) // Serial.println(myDFPlayer.readFolderCounts());
+//      else if(value1 == 6) // Serial.println(myDFPlayer.readCurrentFileNumber());
       break;
     default:
-      Serial.println("Ungültiges Kommando");
+      // Serial.println("Ungültiges Kommando");
       break;
   }
 
 }
 
-void printHelp(){
-  Serial.println("DFPlayer Commands:");
-  Serial.println(" h - help");
-  Serial.println(" > - next ");
-  Serial.println(" < - previous");
-  Serial.println(" p3 - play");
-  Serial.println(" p3,5 - play folder 3, file 5");
-  Serial.println(" P3,5 - play large folder 3, file 5");
-  Serial.println(" P3 - play file 3 in MP3 folder"); 
-  Serial.println(" + - volume up");
-  Serial.println(" - - volume down");
-  Serial.println(" v10 - set volume to 10");
-  Serial.println(" b - Pause");
-  Serial.println(" s - start ");
-  Serial.println(" z - sleep ");
-  Serial.println(" L - enable loop all");
-  Serial.println(" l - disable loop all");
-  Serial.println(" L3 - loop folder 3");
-  Serial.println(" l3 - loop file 3");
-  Serial.println(" A3 - advertise file 3");
-  Serial.println(" a - stop advertise "); 
-  Serial.println(" qx - query No. x");
-  Serial.println("     x = 1 - read state");
-  Serial.println("     x = 2 - read volume");
-  Serial.println("     x = 3 - read equalizer");
-  Serial.println("     x = 4 - read file counts");
-  Serial.println("     x = 5 - read current file number");
-  Serial.println("     x = 6 - read file counts in folder");
-  Serial.println("     x = 7 - read folder counts");
-}
-
 void printDetail(uint8_t type, int value){
   switch (type) {
     case TimeOut:
-      Serial.println(F("Time Out!"));
+      // Serial.println(F("Time Out!"));
       break;
     case WrongStack:
-      Serial.println(F("Stack Wrong!"));
+      // Serial.println(F("Stack Wrong!"));
       break;
     case DFPlayerCardInserted:
-      Serial.println(F("Card Inserted!"));
+      // Serial.println(F("Card Inserted!"));
       break;
     case DFPlayerCardRemoved:
-      Serial.println(F("Card Removed!"));
+      // Serial.println(F("Card Removed!"));
       break;
     case DFPlayerCardOnline:
-      Serial.println(F("Card Online!"));
+      // Serial.println(F("Card Online!"));
       break;
     case DFPlayerUSBInserted:
-      Serial.println("USB Inserted!");
+      // Serial.println("USB Inserted!");
       break;
     case DFPlayerUSBRemoved:
-      Serial.println("USB Removed!");
+      // Serial.println("USB Removed!");
       break;
     case DFPlayerPlayFinished:
       Serial.print(F("Number:"));
       Serial.print(value);
-      Serial.println(F(" Play Finished!"));
+      // Serial.println(F(" Play Finished!"));
       break;
     case DFPlayerError:
       Serial.print(F("DFPlayerError:"));
       switch (value) {
         case Busy:
-          Serial.println(F("Card not found"));
+          // Serial.println(F("Card not found"));
           break;
         case Sleeping:
-          Serial.println(F("Sleeping"));
+          // Serial.println(F("Sleeping"));
           break;
         case SerialWrongStack:
-          Serial.println(F("Get Wrong Stack"));
+          // Serial.println(F("Get Wrong Stack"));
           break;
         case CheckSumNotMatch:
-          Serial.println(F("Check Sum Not Match"));
+          // Serial.println(F("Check Sum Not Match"));
           break;
         case FileIndexOut:
-          Serial.println(F("File Index Out of Bound"));
+          // Serial.println(F("File Index Out of Bound"));
           break;
         case FileMismatch:
-          Serial.println(F("Cannot Find File"));
+          // Serial.println(F("Cannot Find File"));
           break;
         case Advertise:
-          Serial.println(F("In Advertise"));
+          // Serial.println(F("In Advertise"));
           break;
         default:
           break;
